@@ -35,7 +35,28 @@ app.get('/api/events', (req, res) => {
 
 app.get('/api/events/all', (req, res) => {
   try {
-    const events = db.getAllEvents();
+    const fromDate = req.query.fromDate as string;
+    const toDate = req.query.toDate as string;
+    const days = req.query.days ? parseInt(req.query.days as string) : undefined;
+    
+    let events: any[];
+    
+    if (fromDate || toDate) {
+      // Date range filtering
+      const fromTimestamp = fromDate ? new Date(fromDate).getTime() : undefined;
+      const toTimestamp = toDate ? new Date(toDate).getTime() : undefined;
+      events = db.getEventsByDateRange(fromTimestamp, toTimestamp);
+      console.log(`Fetched ${events.length} events from date range`);
+    } else if (days) {
+      // Last N days
+      events = db.getEventsFromLastDays(days);
+      console.log(`Fetched ${events.length} events from last ${days} days`);
+    } else {
+      // Default: last 7 days for performance
+      events = db.getEventsFromLastDays(7);
+      console.log(`Fetched ${events.length} events from last 7 days (default)`);
+    }
+    
     res.json({ success: true, data: events, count: events.length });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch events' });
@@ -662,6 +683,13 @@ app.get('/', (req, res) => {
                 <label>Retry Attempts</label>
                 <input type="number" id="fwd-retry" placeholder="3">
               </div>
+              <div class="form-group">
+                <label>Device Filter (forward only these devices)</label>
+                <input type="text" id="fwd-device-input" placeholder="e.g., Barrier GateIN">
+                <div class="device-list" id="device-list" style="margin-top: 10px;"></div>
+                <button type="button" onclick="addDeviceFilter()" style="margin-top: 5px; padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">➕ Add Device</button>
+                <small style="color: #999; font-size: 0.85rem; display: block; margin-top: 5px;">Leave empty to forward ALL devices</small>
+              </div>
             </div>
           </div>
           <div class="settings-section">
@@ -721,7 +749,21 @@ app.get('/', (req, res) => {
         <input type="text" class="filter-input" id="filter-staffno" placeholder="Filter Staff No..." onkeyup="filterTable()">
         <input type="text" class="filter-input" id="filter-cardno" placeholder="Filter Card No..." onkeyup="filterTable()">
         <input type="text" class="filter-input" id="filter-device" placeholder="Filter Device..." onkeyup="filterTable()">
-        <input type="datetime-local" class="filter-input" id="filter-date" onchange="filterTable()">
+      </div>
+      <div class="date-range-filter" style="padding: 15px; background: #f0f4ff; border-bottom: 2px solid #667eea; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <label style="font-weight: 600; color: #667eea;">📅 Date Range Filter:</label>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <label style="font-size: 0.9rem; color: #555;">From:</label>
+          <input type="datetime-local" class="filter-input" id="filter-date-from" onchange="filterTable()" style="width: 200px;">
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <label style="font-size: 0.9rem; color: #555;">To:</label>
+          <input type="datetime-local" class="filter-input" id="filter-date-to" onchange="filterTable()" style="width: 200px;">
+        </div>
+        <button onclick="clearDateRange()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">🗑️ Clear</button>
+        <button onclick="setToday()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">📆 Today</button>
+        <button onclick="setYesterday()" style="padding: 8px 16px; background: #17a2b8; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">📆 Yesterday</button>
+        <button onclick="setLastWeek()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">📆 Last 7 Days</button>
       </div>
       <div style="padding: 15px; background: #f8f9fa; border-bottom: 2px solid #e9ecef; display: flex; justify-content: space-between; align-items: center;">
         <div style="display: flex; gap: 10px; align-items: center;">
@@ -878,6 +920,47 @@ app.get('/', (req, res) => {
       renderStaffList();
     }
     
+    let deviceFilterList = [];
+    
+    function addDeviceFilter() {
+      const input = document.getElementById('fwd-device-input');
+      const deviceName = input.value.trim();
+      
+      if (!deviceName) {
+        showStatus('Please enter a device name', 'error');
+        return;
+      }
+      
+      if (deviceFilterList.includes(deviceName)) {
+        showStatus('Device already exists in filter list', 'error');
+        return;
+      }
+      
+      deviceFilterList.push(deviceName);
+      input.value = '';
+      renderDeviceList();
+    }
+    
+    function removeDevice(index) {
+      deviceFilterList.splice(index, 1);
+      renderDeviceList();
+    }
+    
+    function renderDeviceList() {
+      const container = document.getElementById('device-list');
+      if (deviceFilterList.length === 0) {
+        container.innerHTML = '<p style="color: #999; font-size: 0.9rem; font-style: italic;">No device filters - will forward ALL devices</p>';
+        return;
+      }
+      
+      container.innerHTML = deviceFilterList.map((device, index) => \`
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #e8f5e9; border-radius: 4px; margin-bottom: 5px;">
+          <span style="color: #2e7d32; font-weight: 500;">\${device}</span>
+          <button onclick="removeDevice(\${index})" style="background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 0.85rem;">✖ Remove</button>
+        </div>
+      \`).join('');
+    }
+    
     async function loadConfiguration() {
       try {
         const response = await fetch('/api/config');
@@ -893,6 +976,7 @@ app.get('/', (req, res) => {
           document.getElementById('fwd-protocol').value = currentConfig.forwarding?.protocol || 'tcp';
           document.getElementById('fwd-timeout').value = currentConfig.forwarding?.timeout || 5000;
           document.getElementById('fwd-retry').value = currentConfig.forwarding?.retryAttempts || 3;
+          deviceFilterList = currentConfig.forwarding?.filterDevices || [];
           
           // Populate monitoring settings
           document.getElementById('monitor-enabled').checked = currentConfig.monitoring?.enabled !== false;
@@ -912,6 +996,7 @@ app.get('/', (req, res) => {
           updateMonitoringState();
           updateFilteringState();
           renderStaffList();
+          renderDeviceList();
         }
       } catch (error) {
         console.error('Failed to load configuration:', error);
@@ -927,7 +1012,8 @@ app.get('/', (req, res) => {
             destinationPort: parseInt(document.getElementById('fwd-port').value),
             protocol: document.getElementById('fwd-protocol').value,
             timeout: parseInt(document.getElementById('fwd-timeout').value),
-            retryAttempts: parseInt(document.getElementById('fwd-retry').value)
+            retryAttempts: parseInt(document.getElementById('fwd-retry').value),
+            filterDevices: deviceFilterList
           },
           monitoring: {
             enabled: document.getElementById('monitor-enabled').checked,
@@ -1006,7 +1092,10 @@ app.get('/', (req, res) => {
       const filterStaffNo = document.getElementById('filter-staffno').value.toLowerCase();
       const filterCardNo = document.getElementById('filter-cardno').value.toLowerCase();
       const filterDevice = document.getElementById('filter-device').value.toLowerCase();
-      const filterDate = document.getElementById('filter-date').value;
+      const filterDateFrom = document.getElementById('filter-date-from').value;
+      const filterDateTo = document.getElementById('filter-date-to').value;
+      
+      console.log('🔍 Filtering - Total events:', allEvents.length);
       
       // Filter events based on criteria
       filteredEvents = allEvents.filter(event => {
@@ -1018,8 +1107,8 @@ app.get('/', (req, res) => {
         const matchCardNo = (event.cardno || '').toLowerCase().includes(filterCardNo);
         const matchDevice = event.devname.toLowerCase().includes(filterDevice);
         
-        let matchDate = true;
-        if (filterDate) {
+        let matchDateRange = true;
+        if (filterDateFrom || filterDateTo) {
           // Parse event date and time
           const eventDateStr = event.trdate; // YYYYMMDD
           const eventTimeStr = event.trtime; // HHMMSS
@@ -1028,16 +1117,32 @@ app.get('/', (req, res) => {
           const eventDay = eventDateStr.substring(6, 8);
           const eventHour = eventTimeStr.substring(0, 2);
           const eventMin = eventTimeStr.substring(2, 4);
+          const eventSec = eventTimeStr.substring(4, 6);
           
-          // Create datetime string: YYYY-MM-DDTHH:MM
-          const eventDateTime = \`\${eventYear}-\${eventMonth}-\${eventDay}T\${eventHour}:\${eventMin}\`;
+          // Create datetime string: YYYY-MM-DDTHH:MM:SS
+          const eventDateTime = \`\${eventYear}-\${eventMonth}-\${eventDay}T\${eventHour}:\${eventMin}:\${eventSec}\`;
+          const eventTimestamp = new Date(eventDateTime).getTime();
           
-          // Check if event datetime starts with filter datetime
-          matchDate = eventDateTime.startsWith(filterDate);
+          // Check date range
+          if (filterDateFrom) {
+            const fromTimestamp = new Date(filterDateFrom).getTime();
+            if (eventTimestamp < fromTimestamp) {
+              matchDateRange = false;
+            }
+          }
+          
+          if (filterDateTo && matchDateRange) {
+            const toTimestamp = new Date(filterDateTo).getTime();
+            if (eventTimestamp > toTimestamp) {
+              matchDateRange = false;
+            }
+          }
         }
         
-        return matchId && matchType && matchDesc && matchStaff && matchStaffNo && matchCardNo && matchDevice && matchDate;
+        return matchId && matchType && matchDesc && matchStaff && matchStaffNo && matchCardNo && matchDevice && matchDateRange;
       });
+      
+      console.log('✅ Filtered results:', filteredEvents.length);
       
       // Reset to page 1 when filters change
       currentPage = 1;
@@ -1047,6 +1152,12 @@ app.get('/', (req, res) => {
     function renderPage() {
       const tbody = document.getElementById('events-body');
       const totalPages = Math.ceil(filteredEvents.length / eventsPerPage);
+      
+      // If current page is beyond total pages, reset to page 1
+      if (currentPage > totalPages && totalPages > 0) {
+        currentPage = 1;
+      }
+      
       const start = (currentPage - 1) * eventsPerPage;
       const end = start + eventsPerPage;
       const pageEvents = filteredEvents.slice(start, end);
@@ -1058,8 +1169,10 @@ app.get('/', (req, res) => {
       document.getElementById('total-pages').textContent = totalPages || 1;
       
       // Enable/disable pagination buttons
-      document.getElementById('prev-btn').disabled = currentPage === 1;
-      document.getElementById('next-btn').disabled = currentPage >= totalPages;
+      const prevBtn = document.getElementById('prev-btn');
+      const nextBtn = document.getElementById('next-btn');
+      if (prevBtn) prevBtn.disabled = currentPage === 1;
+      if (nextBtn) nextBtn.disabled = currentPage >= totalPages || totalPages === 0;
       
       if (pageEvents.length === 0) {
         tbody.innerHTML = '<tr><td colspan="12" class="no-data">No events match the filters.</td></tr>';
@@ -1120,12 +1233,81 @@ app.get('/', (req, res) => {
       }
     }
     
+    function clearDateRange() {
+      document.getElementById('filter-date-from').value = '';
+      document.getElementById('filter-date-to').value = '';
+      filterTable();
+    }
+    
+    function setToday() {
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0);
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59);
+      
+      document.getElementById('filter-date-from').value = formatDateTimeLocal(startOfDay);
+      document.getElementById('filter-date-to').value = formatDateTimeLocal(endOfDay);
+      filterTable();
+    }
+    
+    function setYesterday() {
+      const now = new Date();
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const startOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0);
+      const endOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59);
+      
+      document.getElementById('filter-date-from').value = formatDateTimeLocal(startOfDay);
+      document.getElementById('filter-date-to').value = formatDateTimeLocal(endOfDay);
+      filterTable();
+    }
+    
+    function setLastWeek() {
+      const now = new Date();
+      const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const startOfDay = new Date(lastWeek.getFullYear(), lastWeek.getMonth(), lastWeek.getDate(), 0, 0);
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59);
+      
+      document.getElementById('filter-date-from').value = formatDateTimeLocal(startOfDay);
+      document.getElementById('filter-date-to').value = formatDateTimeLocal(endOfDay);
+      filterTable();
+    }
+    
+    function formatDateTimeLocal(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return \`\${year}-\${month}-\${day}T\${hours}:\${minutes}\`;
+    }
+    
     async function loadEvents() {
       try {
-        const response = await fetch('/api/events/all');
+        // Build query string based on date filters
+        const fromDateInput = document.getElementById('filter-date-from');
+        const toDateInput = document.getElementById('filter-date-to');
+        const fromDate = fromDateInput ? fromDateInput.value : '';
+        const toDate = toDateInput ? toDateInput.value : '';
+        
+        let url = '/api/events/all';
+        const params = new URLSearchParams();
+        
+        if (fromDate || toDate) {
+          // User selected specific date range
+          if (fromDate) params.append('fromDate', fromDate);
+          if (toDate) params.append('toDate', toDate);
+        } else {
+          // Default: last 7 days for performance
+          params.append('days', '7');
+        }
+        
+        if (params.toString()) {
+          url += '?' + params.toString();
+        }
+        
+        const response = await fetch(url);
         const data = await response.json();
         
-        if (data.success && data.count > 0) {
+        if (data.success) {
           allEvents = data.data;
           filteredEvents = data.data;
           
@@ -1154,7 +1336,58 @@ app.get('/', (req, res) => {
     loadEvents();
     loadConfiguration();
     
-    // Polling mechanism as fallback for real-time updates
+    // WebSocket for real-time updates
+    let ws;
+    
+    function connectWebSocket() {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = \`\${wsProtocol}//\${window.location.host}/ws\`;
+      
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('✅ WebSocket connected - real-time updates enabled');
+      };
+      
+      ws.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('📨 WebSocket message received:', data);
+          
+          if (data.type === 'newEvent' && data.data) {
+            // Update last event time for host monitoring
+            lastEventTime = Date.now();
+            
+            // Update lastEventId
+            if (data.data.id > lastEventId) {
+              lastEventId = data.data.id;
+            }
+            
+            // Reload events immediately
+            await loadEvents();
+            console.log('✅ UI updated instantly via WebSocket');
+          } else if (data.type === 'connected') {
+            console.log('✅ WebSocket handshake confirmed');
+          }
+        } catch (error) {
+          console.error('Error processing WebSocket message:', error);
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('❌ WebSocket error:', error);
+      };
+      
+      ws.onclose = () => {
+        console.log('⚠️ WebSocket disconnected - reconnecting in 3 seconds...');
+        setTimeout(connectWebSocket, 3000);
+      };
+    }
+    
+    // Start WebSocket connection
+    connectWebSocket();
+    
+    // Polling mechanism as fallback (reduced to every 5 seconds since WebSocket handles real-time)
     let lastEventId = 0;
     
     async function checkForNewEvents() {
@@ -1190,9 +1423,9 @@ app.get('/', (req, res) => {
       }
     }
     
-    // Poll every 2 seconds for new events
-    setInterval(checkForNewEvents, 2000);
-    console.log('Polling started - checking for new events every 2 seconds');
+    // Poll every 5 seconds as fallback (WebSocket provides instant updates)
+    setInterval(checkForNewEvents, 5000);
+    console.log('Polling started - checking every 5 seconds (WebSocket provides real-time updates)');
   </script>
   
   <footer>

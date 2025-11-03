@@ -120,6 +120,12 @@ const server = net.createServer((socket: net.Socket) => {
                   if (loggingConfig.logFiltering) {
                     console.log(`Forwarding skipped for event type ${eventData.etype} (filtered)`);
                   }
+                } else if (!configManager.shouldForwardDevice(eventData.devname)) {
+                  shouldForward = false;
+                  skipReason = `Device "${eventData.devname}" not in forward list`;
+                  if (loggingConfig.logFiltering) {
+                    console.log(`Forwarding skipped for device "${eventData.devname}" (not in filter list)`);
+                  }
                 }
                 
                 if (shouldForward) {
@@ -173,6 +179,11 @@ server.listen(PORT, () => {
   console.log(`Forwarding: ${config.forwarding.enabled ? 'ENABLED' : 'DISABLED'}`);
   if (config.forwarding.enabled) {
     console.log(`  Destination: ${config.forwarding.destinationHost}:${config.forwarding.destinationPort}`);
+    if (config.forwarding.filterDevices && config.forwarding.filterDevices.length > 0) {
+      console.log(`  Device Filter: ${config.forwarding.filterDevices.join(', ')}`);
+    } else {
+      console.log(`  Device Filter: ALL DEVICES`);
+    }
   }
   console.log(`Filtering: ${config.filtering.enabled ? 'ENABLED' : 'DISABLED'}`);
   if (config.filtering.enabled && config.filtering.skipStaffNumbers.length > 0) {

@@ -8,6 +8,7 @@ export interface ForwardingConfig {
   protocol: 'tcp' | 'http';
   timeout: number;
   retryAttempts: number;
+  filterDevices?: string[];
 }
 
 export interface FilteringConfig {
@@ -72,7 +73,8 @@ class ConfigManager {
         destinationPort: 4000,
         protocol: 'tcp',
         timeout: 5000,
-        retryAttempts: 3
+        retryAttempts: 3,
+        filterDevices: []
       },
       filtering: {
         enabled: false,
@@ -133,6 +135,20 @@ class ConfigManager {
       return false;
     }
     return this.config.filtering.skipEventTypes.includes(eventType);
+  }
+
+  public shouldForwardDevice(deviceName: string): boolean {
+    const filterDevices = this.config.forwarding.filterDevices;
+    
+    // If no device filter specified, forward all devices
+    if (!filterDevices || filterDevices.length === 0) {
+      return true;
+    }
+    
+    // Check if device name matches any filter (case-insensitive partial match)
+    return filterDevices.some(filterDevice => 
+      deviceName.toLowerCase().includes(filterDevice.toLowerCase())
+    );
   }
 }
 

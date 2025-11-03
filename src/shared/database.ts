@@ -95,6 +95,17 @@ export class DatabaseManager {
     this.db.exec(createStaffTableSQL);
     this.db.exec(createDoorCameraTableSQL);
     
+    // Create indexes for better query performance
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_events_trdate ON events(trdate DESC)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_events_devname ON events(devname)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_events_staffno ON events(staffno)');
+      console.log('Database indexes created successfully');
+    } catch (error) {
+      console.warn('Index creation warning:', error);
+    }
+    
     // Add cardno column to existing events table if it doesn't exist
     try {
       this.db.exec('ALTER TABLE events ADD COLUMN cardno TEXT');
@@ -156,6 +167,37 @@ export class DatabaseManager {
   getRecentEvents(limit: number = 100): EventRecord[] {
     const stmt = this.db.prepare('SELECT * FROM events ORDER BY timestamp DESC LIMIT ?');
     return stmt.all(limit) as EventRecord[];
+  }
+
+  getEventsByDateRange(fromTimestamp?: number, toTimestamp?: number, limit?: number): EventRecord[] {
+    let query = 'SELECT * FROM events WHERE 1=1';
+    const params: any[] = [];
+    
+    if (fromTimestamp) {
+      query += ' AND timestamp >= ?';
+      params.push(fromTimestamp);
+    }
+    
+    if (toTimestamp) {
+      query += ' AND timestamp <= ?';
+      params.push(toTimestamp);
+    }
+    
+    query += ' ORDER BY timestamp DESC';
+    
+    if (limit) {
+      query += ' LIMIT ?';
+      params.push(limit);
+    }
+    
+    const stmt = this.db.prepare(query);
+    return stmt.all(...params) as EventRecord[];
+  }
+
+  getEventsFromLastDays(days: number = 7): EventRecord[] {
+    const cutoffTime = Date.now() - (days * 24 * 60 * 60 * 1000);
+    const stmt = this.db.prepare('SELECT * FROM events WHERE timestamp >= ? ORDER BY timestamp DESC');
+    return stmt.all(cutoffTime) as EventRecord[];
   }
 
   // Staff management methods

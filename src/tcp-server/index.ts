@@ -5,6 +5,7 @@ import { configManager } from '../shared/config';
 import { eventForwarder } from '../shared/forwarder';
 import { cctvService } from '../shared/cctv';
 import { wsBroadcaster } from '../shared/websocket';
+import fetch from 'node-fetch';
 
 const PORT = 3001;
 const db = new DatabaseManager();
@@ -64,10 +65,14 @@ const server = net.createServer((socket: net.Socket) => {
               const id = db.insertEvent(eventData);
               console.log(`Stored event #${id}: ${eventData.staffname} - ${eventData.trdesc}`);
               
-              // Broadcast new event to WebSocket clients immediately
+              // Notify the Web UI server to broadcast the new event
               const storedEvent = db.getEventById(id);
               if (storedEvent) {
-                wsBroadcaster.broadcastNewEvent(storedEvent);
+                fetch('http://localhost:3000/api/broadcast-event', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(storedEvent)
+                }).catch(err => console.error('Error notifying web UI:', err));
               }
               
               // Update staff reference table

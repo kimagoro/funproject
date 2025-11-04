@@ -1,48 +1,23 @@
-# Example Configuration for EvokePass
-
-# Copy this file to config.json and customize
-
 {
   "forwarding": {
-    # Enable or disable event forwarding
     "enabled": false,
-    
-    # Destination server IP address or hostname
     "destinationHost": "192.168.1.100",
-    
-    # Destination server port
     "destinationPort": 4000,
-    
-    # Protocol: "tcp" or "http"
-    # - tcp: Sends raw XML data via TCP socket
-    # - http: Sends XML via HTTP POST to /events endpoint
     "protocol": "tcp",
-    
-    # Connection timeout in milliseconds
     "timeout": 5000,
-    
-    # Number of retry attempts if forwarding fails
     "retryAttempts": 3
   },
-  
   "filtering": {
-    # Enable or disable event filtering
     "enabled": false,
-    
-    # List of staff numbers to skip (events won't be stored or forwarded)
-    # Example: ["10-03", "ADMIN-01", "SECURITY-02"]
     "skipStaffNumbers": [],
-    
-    # List of event type codes to skip
-    # Example: ["0", "1"] to skip certain event types
     "skipEventTypes": []
   },
-  
   "logging": {
-    # Log forwarding activities to console
     "logForwarding": true,
-    
-    # Log filtering actions to console
     "logFiltering": true
+  },
+  "callTracking": {
+    "enabled": false,
+    "trackedNumbers": []
   }
 }

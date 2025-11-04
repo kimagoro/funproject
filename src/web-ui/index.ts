@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import path from 'path';
 import { createServer } from 'http';
 import { DatabaseManager } from '../shared/database';
@@ -191,332 +191,92 @@ app.post('/api/test-snapshot/:devname', async (req, res) => {
   }
 });
 
+app.post('/api/broadcast-event', (req, res) => {
+  try {
+    const event = req.body;
+    
+    // Determine if the event is tracked
+    const config = configManager.getConfig();
+    const trackedItems = config.callTracking?.trackedItems || [];
+    let isTracked = false;
+    
+    for (const item of trackedItems) {
+      const [type, value] = item.split(':');
+      if (type === 'staffno' && event.staffno === value) {
+        isTracked = true;
+        break;
+      }
+      if (type === 'cardno' && event.cardno === value) {
+        isTracked = true;
+        break;
+      }
+      if (type === 'staffname' && event.staffname === value) {
+        isTracked = true;
+        break;
+      }
+      if (type === 'devname' && event.devname === value) {
+        isTracked = true;
+        break;
+      }
+    }
+                      
+    // Broadcast the new event with tracking info
+    wsBroadcaster.broadcastNewEvent({ ...event, isTracked });
+    
+    // If it's a tracked event, also send the specific call tracking message
+    if (isTracked) {
+      wsBroadcaster.broadcastCallTrackingEvent(event);
+    }
+    
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error broadcasting event:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/track', (req, res) => {
+  try {
+    const { items } = req.body;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, error: 'Invalid input: items must be an array.' });
+    }
+
+    const configPath = path.join(__dirname, '../../config.json');
+    const currentConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+    // Ensure callTracking section exists
+    if (!currentConfig.callTracking) {
+      currentConfig.callTracking = { enabled: false, trackedItems: [] };
+    }
+
+    // Update tracking config
+    currentConfig.callTracking.trackedItems = items;
+    currentConfig.callTracking.enabled = items.length > 0;
+
+    // Write back to file
+    fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 2), 'utf-8');
+
+    // Reload config in memory to apply changes immediately
+    configManager.reloadConfig();
+
+    res.json({ success: true, message: `Tracking settings updated for ${items.length} items.` });
+  } catch (error: any) {
+    console.error('Failed to update tracking config:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('/config/doors', (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Door/Camera Configuration - EvokePass</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 0; }
-    .container { max-width: 100%; margin: 0 auto; }
-    
-    /* Header with logo and menu */
-    header { background: white; padding: 10px 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
-    .logo-section { display: flex; align-items: center; gap: 15px; }
-    .logo { max-width: 80px; height: auto; }
-    .brand-text { font-size: 1.3rem; font-weight: bold; color: #667eea; margin: 0; }
-    
-    /* Navigation Menu */
-    .nav-menu { display: flex; gap: 5px; align-items: center; }
-    .nav-menu a, .nav-menu button { padding: 8px 16px; background: #667eea; color: white; text-decoration: none; border: none; border-radius: 5px; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: background 0.3s; }
-    .nav-menu a:hover, .nav-menu button:hover { background: #5568d3; }
-    .nav-menu a.active { background: #5568d3; }
-    
-    /* Content area */
-    .content { padding: 20px; }
-    .controls { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
-    .add-btn { padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: bold; }
-    .add-btn:hover { background: #218838; }
-    .table-container { background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }
-    table { width: 100%; border-collapse: collapse; }
-    thead { background: #667eea; color: white; position: sticky; top: 0; z-index: 10; }
-    th { padding: 15px 12px; text-align: left; font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
-    tbody tr { border-bottom: 1px solid #e9ecef; transition: background 0.2s; }
-    tbody tr:hover { background: #f8f9fa; }
-    td { padding: 12px; font-size: 0.9rem; }
-    .actions button { padding: 6px 12px; margin-right: 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
-    .edit-btn { background: #007bff; color: white; }
-    .test-btn { background: #28a745; color: white; }
-    .test-btn:hover { background: #218838; }
-    .delete-btn { background: #dc3545; color: white; }
-    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
-    .modal-content { background: white; margin: 5% auto; padding: 30px; border-radius: 10px; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
-    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .modal-header h2 { color: #333; }
-    .close { font-size: 28px; font-weight: bold; cursor: pointer; color: #999; }
-    .close:hover { color: #333; }
-    .form-group { margin-bottom: 15px; }
-    .form-group label { display: block; font-weight: 600; margin-bottom: 5px; color: #555; }
-    .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 0.9rem; }
-    .form-group input[type="checkbox"] { width: auto; margin-right: 8px; }
-    .checkbox-label { display: flex; align-items: center; }
-    .save-btn { width: 100%; padding: 12px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: bold; margin-top: 10px; }
-    .save-btn:hover { background: #218838; }
-    .status-message { padding: 10px; border-radius: 5px; margin-top: 15px; text-align: center; display: none; }
-    .status-message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-    .status-message.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-    .no-data { text-align: center; padding: 40px; color: #999; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <!-- Header with logo and menu -->
-    <header>
-      <div class="logo-section">
-        <img src="https://udaproperty.com.my/sites/default/files/styles/project_logo/public/node/project/images/2022-12/Evoke_1.png?itok=MIgcniXd" alt="Evoke Logo" class="logo">
-        <h1 class="brand-text">EvokePass - Door Config</h1>
-      </div>
-      <div class="nav-menu">
-        <a href="/">📊 Dashboard</a>
-        <button onclick="toggleSettings()">⚙️ Publish Config</button>
-        <a href="/config/doors" class="active">🚪 Door Config</a>
-      </div>
-    </header>
-    
-    <div class="content">
-    <div class="controls">
-      <div>
-        <strong>Total Doors Configured: <span id="door-count">0</span></strong>
-      </div>
-      <button class="add-btn" onclick="showAddModal()">➕ Add Door Configuration</button>
-    </div>
-    
-    <div class="table-container">
-      <div style="overflow-x: auto; max-height: 600px; overflow-y: auto;">
-        <table id="doors-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Door Name (DEVNAME)</th>
-              <th>Camera IP</th>
-              <th>Port</th>
-              <th>Username</th>
-              <th>ONVIF</th>
-              <th>Stream URL</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="doors-body">
-            <tr><td colspan="8" class="no-data">Loading door configurations...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  
-  <!-- Modal for Add/Edit -->
-  <div id="doorModal" class="modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2 id="modal-title">Add Door Configuration</h2>
-        <span class="close" onclick="closeModal()">&times;</span>
-      </div>
-      <form id="door-form">
-        <input type="hidden" id="door-id">
-        <div class="form-group">
-          <label>Door Name (DEVNAME) *</label>
-          <input type="text" id="door-devname" required placeholder="e.g., Barrier GateIN">
-        </div>
-        <div class="form-group">
-          <label>Camera IP Address *</label>
-          <input type="text" id="door-ip" required placeholder="192.168.1.100">
-        </div>
-        <div class="form-group">
-          <label>Camera Port</label>
-          <input type="number" id="door-port" value="80" placeholder="80">
-        </div>
-        <div class="form-group">
-          <label>Camera Username *</label>
-          <input type="text" id="door-username" required placeholder="admin">
-        </div>
-        <div class="form-group">
-          <label>Camera Password *</label>
-          <input type="password" id="door-password" required placeholder="password">
-        </div>
-        <div class="form-group">
-          <label>Stream URL (RTSP)</label>
-          <input type="text" id="door-stream" placeholder="rtsp://192.168.1.100:554/stream1">
-        </div>
-        <div class="form-group">
-          <label class="checkbox-label">
-            <input type="checkbox" id="door-onvif" checked>
-            Enable ONVIF
-          </label>
-        </div>
-        <button type="submit" class="save-btn">💾 Save Configuration</button>
-        <div id="modal-status" class="status-message"></div>
-      </form>
-    </div>
-  </div>
-  
-  <script>
-    let currentEditId = null;
-    
-    function showAddModal() {
-      currentEditId = null;
-      document.getElementById('modal-title').textContent = 'Add Door Configuration';
-      document.getElementById('door-form').reset();
-      document.getElementById('door-id').value = '';
-      document.getElementById('doorModal').style.display = 'block';
-    }
-    
-    function showEditModal(door) {
-      currentEditId = door.id;
-      document.getElementById('modal-title').textContent = 'Edit Door Configuration';
-      document.getElementById('door-id').value = door.id || '';
-      document.getElementById('door-devname').value = door.devname;
-      document.getElementById('door-ip').value = door.camera_ip;
-      document.getElementById('door-port').value = door.camera_port;
-      document.getElementById('door-username').value = door.camera_username;
-      document.getElementById('door-password').value = door.camera_password;
-      document.getElementById('door-stream').value = door.stream_url || '';
-      document.getElementById('door-onvif').checked = door.onvif_enabled;
-      document.getElementById('doorModal').style.display = 'block';
-    }
-    
-    function closeModal() {
-      document.getElementById('doorModal').style.display = 'none';
-      document.getElementById('modal-status').style.display = 'none';
-    }
-    
-    function toggleSettings() {
-      window.location.href = '/';
-    }
-    
-    async function loadDoors() {
-      try {
-        const response = await fetch('/api/door-cameras');
-        const data = await response.json();
-        
-        if (data.success) {
-          document.getElementById('door-count').textContent = data.count;
-          const tbody = document.getElementById('doors-body');
-          
-          if (data.count === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="no-data">No door configurations yet. Click "Add Door Configuration" to get started.</td></tr>';
-            return;
-          }
-          
-          tbody.innerHTML = data.data.map(door => \`
-            <tr>
-              <td>#\${door.id}</td>
-              <td><strong>\${door.devname}</strong></td>
-              <td>\${door.camera_ip}</td>
-              <td>\${door.camera_port}</td>
-              <td>\${door.camera_username}</td>
-              <td>\${door.onvif_enabled ? '✅ Yes' : '❌ No'}</td>
-              <td>\${door.stream_url ? '<a href="' + door.stream_url + '" target="_blank" class="stream-button">📹 Live</a>' : '-'}</td>
-              <td class="actions">
-                <button class="edit-btn" onclick='showEditModal(\${JSON.stringify(door)})'>✏️ Edit</button>
-                <button class="test-btn" onclick="testSnapshot('\${door.devname}')" title="Test snapshot capture">📸 Test</button>
-                <button class="delete-btn" onclick="deleteDoor('\${door.devname}')">🗑️ Delete</button>
-              </td>
-            </tr>
-          \`).join('');
-        }
-      } catch (error) {
-        console.error('Failed to load doors:', error);
-        document.getElementById('doors-body').innerHTML = 
-          '<tr><td colspan="8" class="no-data">Error loading doors. Make sure the server is running.</td></tr>';
-      }
-    }
-    
-    document.getElementById('door-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      const doorData = {
-        devname: document.getElementById('door-devname').value,
-        camera_ip: document.getElementById('door-ip').value,
-        camera_port: parseInt(document.getElementById('door-port').value),
-        camera_username: document.getElementById('door-username').value,
-        camera_password: document.getElementById('door-password').value,
-        stream_url: document.getElementById('door-stream').value || undefined,
-        onvif_enabled: document.getElementById('door-onvif').checked
-      };
-      
-      try {
-        const response = await fetch('/api/door-cameras', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(doorData)
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-          showModalStatus('✅ Configuration saved successfully!', 'success');
-          setTimeout(() => {
-            closeModal();
-            loadDoors();
-          }, 1500);
-        } else {
-          showModalStatus('❌ Failed to save: ' + (data.error || 'Unknown error'), 'error');
-        }
-      } catch (error) {
-        showModalStatus('❌ Failed to save configuration: ' + error.message, 'error');
-      }
-    });
-    
-    async function deleteDoor(devname) {
-      if (!confirm(\`Are you sure you want to delete the configuration for "\${devname}"?\`)) {
-        return;
-      }
-      
-      try {
-        const response = await fetch('/api/door-cameras/' + encodeURIComponent(devname), {
-          method: 'DELETE'
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-          loadDoors();
-        } else {
-          alert('Failed to delete: ' + (data.error || 'Unknown error'));
-        }
-      } catch (error) {
-        alert('Failed to delete configuration: ' + error.message);
-      }
-    }
-    
-    async function testSnapshot(devname) {
-      if (!confirm(\`Test snapshot capture for "\${devname}"?\`)) return;
-      
-      try {
-        const response = await fetch(\`/api/test-snapshot/\${encodeURIComponent(devname)}\`, {
-          method: 'POST'
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-          const snapshotUrl = \`/snapshots/\${data.imagePath}\`;
-          const streamInfo = data.streamUrl ? \`\\n\\nStream URL: \${data.streamUrl}\` : '';
-          alert(\`✅ Snapshot captured successfully!\\n\\nImage: \${data.imagePath}\${streamInfo}\`);
-          
-          // Open the captured snapshot in a new tab
-          window.open(snapshotUrl, '_blank');
-        } else {
-          const streamInfo = data.streamUrl ? \`\\n\\nStream URL available: \${data.streamUrl}\` : '';
-          alert(\`❌ Snapshot capture failed:\\n\${data.error}\${streamInfo}\`);
-        }
-      } catch (error) {
-        alert('Failed to test snapshot: ' + error.message);
-      }
-    }
-    
-    function showModalStatus(message, type) {
-      const statusDiv = document.getElementById('modal-status');
-      statusDiv.textContent = message;
-      statusDiv.className = 'status-message ' + type;
-      statusDiv.style.display = 'block';
-    }
-    
-    // Load doors on page load
-    loadDoors();
-  </script>
-  
-  <footer>
-    <p>&copy; 2022-2025 EvokePass. All Rights Reserved.</p>
-  </footer>
-</body>
-</html>`);
+  res.send(getDoorsPageHtml());
 });
 
 app.get('/', (req, res) => {
-  res.send(`<!DOCTYPE html>
+  res.send(getMainDashboardHtml());
+});
+
+function getMainDashboardHtml() {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -527,7 +287,7 @@ app.get('/', (req, res) => {
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 0; }
     .container { max-width: 100%; margin: 0 auto; }
     
-    /* Header with logo on left and menu */
+    /* Header with logo and menu */
     header { background: white; padding: 10px 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
     .logo-section { display: flex; align-items: center; gap: 15px; }
     .logo { max-width: 80px; height: auto; }
@@ -566,6 +326,24 @@ app.get('/', (req, res) => {
     tbody tr:hover { background: #f8f9fa; }
     tbody tr.violation { background: #fff5f5; }
     tbody tr.violation:hover { background: #ffe5e5; }
+    
+    /* Animation for tracked event */
+    @keyframes flash-tracked-event {
+      0%, 100% { background-color: inherit; }
+      25%, 75% { background-color: #ffeb3b; font-weight: bold; }
+    }
+    .tracked-event-flash {
+      animation: flash-tracked-event 2.5s ease-in-out;
+    }
+    
+    /* Tracker Modal */
+    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+    .modal-content { background: white; margin: 10% auto; padding: 30px; border-radius: 10px; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .modal-header h2 { color: #333; }
+    .close { font-size: 28px; font-weight: bold; cursor: pointer; color: #999; }
+    .close:hover { color: #333; }
+    
     td { padding: 12px; font-size: 0.9rem; }
     .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
     .badge.success { background: #e8f5e9; color: #2e7d32; }
@@ -617,6 +395,36 @@ app.get('/', (req, res) => {
     .status-message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     .status-message.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
     
+    /* Tracking Panel */
+    .tracking-panel { background: #fff; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .tracking-panel h2 { font-size: 1.5rem; color: #333; margin-bottom: 15px; }
+    .tracking-controls { display: flex; gap: 10px; }
+    .tracking-controls input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 1rem; }
+    .tracking-controls button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+    .tracking-controls button:hover { background: #0056b3; }
+    #stop-tracking-btn { background: #dc3545; }
+    #stop-tracking-btn:hover { background: #c82333; }
+
+    /* Flash Notification */
+    .flash-notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      z-index: 2000;
+      font-size: 1.2rem;
+      display: none;
+      animation: slideIn 0.5s forwards;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(100%); }
+      to { transform: translateX(0); }
+    }
+
     /* Footer */
     footer { background: rgba(255,255,255,0.95); padding: 15px 0; margin-top: 40px; text-align: center; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); }
     footer p { color: #666; font-size: 0.9rem; margin: 0; }
@@ -633,6 +441,7 @@ app.get('/', (req, res) => {
       <div class="nav-menu">
         <a href="/" class="active">📊 Dashboard</a>
         <button onclick="toggleSettings()">⚙️ Publish Config</button>
+        <button onclick="showTrackerModal()">🎯 Tracker</button>
         <a href="/config/doors">🚪 Door Config</a>
         <button class="refresh-btn-small" onclick="loadEvents()">🔄 Refresh</button>
       </div>
@@ -644,6 +453,33 @@ app.get('/', (req, res) => {
     </div>
     
     <div class="content">
+      <!-- Tracker Modal -->
+      <div id="trackerModal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>🎯 Item Tracker Configuration</h2>
+            <span class="close" onclick="closeTrackerModal()">&times;</span>
+          </div>
+          <div class="form-group">
+            <label>Track by:</label>
+            <select id="tracker-type" class="filter-input">
+              <option value="staffno">Staff No</option>
+              <option value="cardno">Card No</option>
+              <option value="staffname">Staff Name</option>
+              <option value="devname">Device Name</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Value to Track:</label>
+            <input type="text" id="tracker-value" class="filter-input" placeholder="Enter value...">
+          </div>
+          <button onclick="addTrackedItem()" class="add-btn" style="width: 100%; margin-bottom: 20px;">➕ Add Item to Tracker</button>
+          
+          <h3>Currently Tracked Items:</h3>
+          <div id="tracked-items-list" style="margin-top: 10px;"></div>
+        </div>
+      </div>
+
       <!-- Settings Panel -->
       <div class="settings-panel" id="settings-panel">
       <div class="settings-header">
@@ -992,6 +828,16 @@ app.get('/', (req, res) => {
           document.getElementById('filter-enabled').checked = currentConfig.filtering?.enabled || false;
           skipStaffList = currentConfig.filtering?.skipStaffNumbers || [];
           
+          // Populate call tracking settings
+          if (currentConfig.callTracking && currentConfig.callTracking.enabled) {
+            const trackedItems = currentConfig.callTracking.trackedItems || [];
+            document.getElementById('tracking-input').value = trackedItems.join(', ');
+            if (trackedItems.length > 0) {
+              document.getElementById('stop-tracking-btn').style.display = 'inline-block';
+              document.getElementById('tracking-status').textContent = 'Currently tracking: ' + trackedItems.join(', ');
+            }
+          }
+          
           updateForwardingState();
           updateMonitoringState();
           updateFilteringState();
@@ -1090,61 +936,31 @@ app.get('/', (req, res) => {
       const filterDesc = document.getElementById('filter-desc').value.toLowerCase();
       const filterStaff = document.getElementById('filter-staff').value.toLowerCase();
       const filterStaffNo = document.getElementById('filter-staffno').value.toLowerCase();
-      const filterCardNo = document.getElementById('filter-cardno').value.toLowerCase();
+      const filterCardNo = (document.getElementById('filter-cardno').value || '').toLowerCase();
       const filterDevice = document.getElementById('filter-device').value.toLowerCase();
-      const filterDateFrom = document.getElementById('filter-date-from').value;
-      const filterDateTo = document.getElementById('filter-date-to').value;
+      const fromDate = document.getElementById('filter-date-from').value;
+      const toDate = document.getElementById('filter-date-to').value;
       
-      console.log('🔍 Filtering - Total events:', allEvents.length);
-      
-      // Filter events based on criteria
+      const fromTimestamp = fromDate ? new Date(fromDate).getTime() : 0;
+      const toTimestamp = toDate ? new Date(toDate).getTime() : Infinity;
+
       filteredEvents = allEvents.filter(event => {
-        const matchId = String(event.id).toLowerCase().includes(filterId);
-        const matchType = event.etype.toLowerCase().includes(filterType);
-        const matchDesc = event.trdesc.toLowerCase().includes(filterDesc);
-        const matchStaff = event.staffname.toLowerCase().includes(filterStaff);
-        const matchStaffNo = event.staffno.toLowerCase().includes(filterStaffNo);
-        const matchCardNo = (event.cardno || '').toLowerCase().includes(filterCardNo);
-        const matchDevice = event.devname.toLowerCase().includes(filterDevice);
+        const eventTimestamp = new Date(event.timestamp).getTime();
+        const cardNo = (event.cardno || '').toLowerCase();
         
-        let matchDateRange = true;
-        if (filterDateFrom || filterDateTo) {
-          // Parse event date and time
-          const eventDateStr = event.trdate; // YYYYMMDD
-          const eventTimeStr = event.trtime; // HHMMSS
-          const eventYear = eventDateStr.substring(0, 4);
-          const eventMonth = eventDateStr.substring(4, 6);
-          const eventDay = eventDateStr.substring(6, 8);
-          const eventHour = eventTimeStr.substring(0, 2);
-          const eventMin = eventTimeStr.substring(2, 4);
-          const eventSec = eventTimeStr.substring(4, 6);
-          
-          // Create datetime string: YYYY-MM-DDTHH:MM:SS
-          const eventDateTime = \`\${eventYear}-\${eventMonth}-\${eventDay}T\${eventHour}:\${eventMin}:\${eventSec}\`;
-          const eventTimestamp = new Date(eventDateTime).getTime();
-          
-          // Check date range
-          if (filterDateFrom) {
-            const fromTimestamp = new Date(filterDateFrom).getTime();
-            if (eventTimestamp < fromTimestamp) {
-              matchDateRange = false;
-            }
-          }
-          
-          if (filterDateTo && matchDateRange) {
-            const toTimestamp = new Date(filterDateTo).getTime();
-            if (eventTimestamp > toTimestamp) {
-              matchDateRange = false;
-            }
-          }
-        }
-        
-        return matchId && matchType && matchDesc && matchStaff && matchStaffNo && matchCardNo && matchDevice && matchDateRange;
+        return (
+          event.id.toString().toLowerCase().includes(filterId) &&
+          event.etype.toLowerCase().includes(filterType) &&
+          event.trdesc.toLowerCase().includes(filterDesc) &&
+          event.staffname.toLowerCase().includes(filterStaff) &&
+          event.staffno.toLowerCase().includes(filterStaffNo) &&
+          cardNo.includes(filterCardNo) &&
+          event.devname.toLowerCase().includes(filterDevice) &&
+          eventTimestamp >= fromTimestamp &&
+          eventTimestamp <= toTimestamp
+        );
       });
       
-      console.log('✅ Filtered results:', filteredEvents.length);
-      
-      // Reset to page 1 when filters change
       currentPage = 1;
       renderPage();
     }
@@ -1152,17 +968,10 @@ app.get('/', (req, res) => {
     function renderPage() {
       const tbody = document.getElementById('events-body');
       const totalPages = Math.ceil(filteredEvents.length / eventsPerPage);
-      
-      // If current page is beyond total pages, reset to page 1
-      if (currentPage > totalPages && totalPages > 0) {
-        currentPage = 1;
-      }
-      
       const start = (currentPage - 1) * eventsPerPage;
       const end = start + eventsPerPage;
       const pageEvents = filteredEvents.slice(start, end);
       
-      // Update pagination info
       document.getElementById('showing-count').textContent = pageEvents.length;
       document.getElementById('filtered-count').textContent = filteredEvents.length;
       document.getElementById('current-page').textContent = currentPage;
@@ -1186,21 +995,17 @@ app.get('/', (req, res) => {
         
         let snapshotCell = '-';
         if (event.snapshot_path) {
-          const snapshotURL = '/snapshots/' + event.snapshot_path.split('/').pop().split('\\\\\\\\').pop();
-          snapshotCell = \`<img src="\${snapshotURL}" class="snapshot-thumb" alt="Snapshot" onclick="window.open('\${snapshotURL}', '_blank')" title="Click to view full size">\`;
+          const snapshotURL = '/snapshots/' + event.snapshot_path.split('/').pop().split('\\\\').pop();
+          snapshotCell = \`<a href="\${snapshotURL}" target="_blank"><img src="\${snapshotURL}" class="snapshot-thumb"></a>\`;
         }
         
         let streamCell = '-';
         if (event.stream_url) {
-          streamCell = \`
-            <a href="\${event.stream_url}" class="stream-button" target="_blank" title="Open RTSP stream in player">
-              📹 Live
-            </a>
-          \`;
+          streamCell = \`<a href="\${event.stream_url}" target="_blank" class="stream-button">📹 Live</a>\`;
         }
         
         return \`
-          <tr class="\${rowClass}">
+          <tr class="\${rowClass}" data-event-id="\${event.id}">
             <td>#\${event.id}</td>
             <td><span class="badge \${badgeClass}">\${event.etype}</span></td>
             <td>\${event.trdesc}</td>
@@ -1251,7 +1056,7 @@ app.get('/', (req, res) => {
     
     function setYesterday() {
       const now = new Date();
-      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const yesterday = new Date(now.setDate(now.getDate() - 1));
       const startOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0);
       const endOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59);
       
@@ -1262,9 +1067,9 @@ app.get('/', (req, res) => {
     
     function setLastWeek() {
       const now = new Date();
-      const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const startOfDay = new Date(lastWeek.getFullYear(), lastWeek.getMonth(), lastWeek.getDate(), 0, 0);
       const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59);
+      const startOfWeek = new Date(now.setDate(now.getDate() - 6));
+      const startOfDay = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate(), 0, 0);
       
       document.getElementById('filter-date-from').value = formatDateTimeLocal(startOfDay);
       document.getElementById('filter-date-to').value = formatDateTimeLocal(endOfDay);
@@ -1291,16 +1096,15 @@ app.get('/', (req, res) => {
         let url = '/api/events/all';
         const params = new URLSearchParams();
         
-        if (fromDate || toDate) {
-          // User selected specific date range
-          if (fromDate) params.append('fromDate', fromDate);
-          if (toDate) params.append('toDate', toDate);
-        } else {
-          // Default: last 7 days for performance
+        if (fromDate) params.append('fromDate', fromDate);
+        if (toDate) params.append('toDate', toDate);
+        
+        // If no date range, default to last 7 days
+        if (!fromDate && !toDate) {
           params.append('days', '7');
         }
         
-        if (params.toString()) {
+        if (Array.from(params).length > 0) {
           url += '?' + params.toString();
         }
         
@@ -1309,21 +1113,11 @@ app.get('/', (req, res) => {
         
         if (data.success) {
           allEvents = data.data;
-          filteredEvents = data.data;
-          
-          // Update last event time for host monitoring
-          lastEventTime = Date.now();
-          
-          if (data.count === 0) {
-            const tbody = document.getElementById('events-body');
-            tbody.innerHTML = '<tr><td colspan="12" class="no-data">No events yet. Send a test event using .\\\\test-event.ps1</td></tr>';
-            document.getElementById('showing-count').textContent = '0';
-            document.getElementById('filtered-count').textContent = '0';
-            return;
-          }
-          
-          // Initial render with pagination
           filterTable();
+        } else {
+          console.error('Failed to load events:', data.error);
+          document.getElementById('events-body').innerHTML = 
+            '<tr><td colspan="12" class="no-data">Error loading events.</td></tr>';
         }
       } catch (error) {
         console.error('Failed to load events:', error);
@@ -1332,80 +1126,167 @@ app.get('/', (req, res) => {
       }
     }
     
-    // Load events on page load
-    loadEvents();
-    loadConfiguration();
-    
-    // WebSocket for real-time updates
-    let ws;
-    
+    // WebSocket connection
     function connectWebSocket() {
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = \`\${wsProtocol}//\${window.location.host}/ws\`;
-      
-      ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(\`ws://\${window.location.host}/ws\`);
       
       ws.onopen = () => {
-        console.log('✅ WebSocket connected - real-time updates enabled');
+        console.log('WebSocket connected');
       };
       
-      ws.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('📨 WebSocket message received:', data);
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        
+        if (message.type === 'newEvent') {
+          console.log('New event received via WebSocket:', message.data);
           
-          if (data.type === 'newEvent' && data.data) {
-            // Update last event time for host monitoring
-            lastEventTime = Date.now();
-            
-            // Update lastEventId
-            if (data.data.id > lastEventId) {
-              lastEventId = data.data.id;
-            }
-            
-            // Reload events immediately
-            await loadEvents();
-            console.log('✅ UI updated instantly via WebSocket');
-          } else if (data.type === 'connected') {
-            console.log('✅ WebSocket handshake confirmed');
+          // Update last event time for host monitoring
+          lastEventTime = Date.now();
+          
+          // Add to top of table and re-render
+          allEvents.unshift(message.data);
+          filterTable();
+          
+          // If this is a tracked event, flash the row
+          if (message.data.isTracked) {
+            // Use a short delay to ensure the row is in the DOM
+            setTimeout(() => {
+              const row = document.querySelector('[data-event-id="' + message.data.id + '"]');
+              if (row) {
+                row.classList.add('tracked-event-flash');
+                setTimeout(() => {
+                  row.classList.remove('tracked-event-flash');
+                }, 2500);
+              }
+            }, 100);
           }
-        } catch (error) {
-          console.error('Error processing WebSocket message:', error);
+        } else if (message.type === 'callTracking') {
+          showFlashNotification(message.data);
         }
       };
       
-      ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
+      ws.onclose = () => {
+        console.log('WebSocket disconnected, retrying in 5 seconds...');
+        setTimeout(connectWebSocket, 5000);
       };
       
-      ws.onclose = () => {
-        console.log('⚠️ WebSocket disconnected - reconnecting in 3 seconds...');
-        setTimeout(connectWebSocket, 3000);
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
       };
     }
     
-    // Start WebSocket connection
+    // Tracker Modal
+    function showTrackerModal() {
+      document.getElementById('trackerModal').style.display = 'block';
+      renderTrackedItems();
+    }
+    
+    function closeTrackerModal() {
+      document.getElementById('trackerModal').style.display = 'none';
+    }
+    
+    function renderTrackedItems() {
+      const container = document.getElementById('tracked-items-list');
+      const trackedItems = currentConfig.callTracking?.trackedItems || [];
+      
+      if (trackedItems.length === 0) {
+        container.innerHTML = '<p style="color: #999; font-style: italic;">No items are being tracked.</p>';
+        return;
+      }
+      
+      container.innerHTML = trackedItems.map((item, index) => \`
+        <div class="staff-tag">
+          <span>\${item}</span>
+          <span class="remove" onclick="removeTrackedItem(\${index})">×</span>
+        </div>
+      \`).join('');
+    }
+    
+    async function addTrackedItem() {
+      const type = document.getElementById('tracker-type').value;
+      const value = document.getElementById('tracker-value').value.trim();
+      
+      if (!value) {
+        showStatus('Please enter a value to track.', 'error');
+        return;
+      }
+      
+      const trackedItems = currentConfig.callTracking?.trackedItems || [];
+      const newItem = type + ':' + value;
+      
+      if (trackedItems.includes(newItem)) {
+        showStatus('This item is already being tracked.', 'error');
+        return;
+      }
+      
+      trackedItems.push(newItem);
+      await saveTrackedItems(trackedItems);
+      document.getElementById('tracker-value').value = '';
+      renderTrackedItems();
+    }
+    
+    async function removeTrackedItem(index) {
+      const trackedItems = currentConfig.callTracking?.trackedItems || [];
+      trackedItems.splice(index, 1);
+      await saveTrackedItems(trackedItems);
+      renderTrackedItems();
+    }
+    
+    async function saveTrackedItems(items) {
+      try {
+        const response = await fetch('/api/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items })
+        });
+        const data = await response.json();
+        
+        if (!data.success) {
+          showStatus('Failed to save tracking settings: ' + data.error, 'error');
+        } else {
+          // Reload config to get the latest settings
+          await loadConfiguration();
+        }
+      } catch (error) {
+        showStatus('Error saving tracking settings: ' + error.message, 'error');
+      }
+    }
+    
+    function showFlashNotification(data) {
+      const notification = document.createElement('div');
+      notification.className = 'flash-notification';
+      notification.innerHTML = \`
+        <strong>\${data.staffname}</strong> at <strong>\${data.devname}</strong>
+        <div style="font-size: 0.9rem; margin-top: 5px;">\${formatTime(data.trtime)}</div>
+      \`;
+      document.body.appendChild(notification);
+      
+      notification.style.display = 'block';
+      
+      setTimeout(() => {
+        notification.remove();
+      }, 5000);
+    }
+    
+    // Initial load
+    loadEvents();
+    loadConfiguration();
     connectWebSocket();
     
-    // Polling mechanism as fallback (reduced to every 5 seconds since WebSocket handles real-time)
+    // Fallback polling for new events (in case WebSocket fails)
     let lastEventId = 0;
     
     async function checkForNewEvents() {
       try {
         const response = await fetch('/api/events?limit=1');
-        const result = await response.json();
+        const data = await response.json();
         
-        console.log('Polling check - received:', result);
-        
-        if (result.success && result.data && result.data.length > 0) {
-          const latestEvent = result.data[0];
+        if (data.success && data.data.length > 0) {
+          const latestEvent = data.data[0];
           
-          // If we have a new event (higher ID than last known)
-          if (latestEvent.id > lastEventId) {
-            console.log('✅ New event detected:', latestEvent.id, '(previous:', lastEventId, ')');
-            
-            // Update last event time for host monitoring
-            lastEventTime = Date.now();
+          // If new event is different from last known, reload all
+          if (lastEventId > 0 && latestEvent.id > lastEventId) {
+            console.log('New event detected via polling, reloading...');
             
             // Update lastEventId BEFORE reloading to prevent duplicate reloads
             lastEventId = latestEvent.id;
@@ -1432,10 +1313,347 @@ app.get('/', (req, res) => {
     <p>&copy; 2022-2025 EvokePass. All Rights Reserved.</p>
   </footer>
 </body>
-</html>`);
-});
+</html>`;
+}
+
+function getDoorsPageHtml() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Door/Camera Configuration - EvokePass</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 0; }
+    .container { max-width: 100%; margin: 0 auto; }
+    
+    /* Header with logo and menu */
+    header { background: white; padding: 10px 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+    .logo-section { display: flex; align-items: center; gap: 15px; }
+    .logo { max-width: 80px; height: auto; }
+    .brand-text { font-size: 1.3rem; font-weight: bold; color: #667eea; margin: 0; }
+    
+    /* Navigation Menu */
+    .nav-menu { display: flex; gap: 5px; align-items: center; }
+    .nav-menu a, .nav-menu button { padding: 8px 16px; background: #667eea; color: white; text-decoration: none; border: none; border-radius: 5px; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: background 0.3s; }
+    .nav-menu a:hover, .nav-menu button:hover { background: #5568d3; }
+    .nav-menu a.active { background: #5568d3; }
+    
+    /* Content area */
+    .content { padding: 20px; }
+    .controls { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
+    .add-btn { padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: bold; }
+    .add-btn:hover { background: #218838; }
+    .table-container { background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: #667eea; color: white; position: sticky; top: 0; z-index: 10; }
+    th { padding: 15px 12px; text-align: left; font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid #e9ecef; transition: background 0.2s; }
+    tbody tr:hover { background: #f8f9fa; }
+    td { padding: 12px; font-size: 0.9rem; }
+    .actions button { padding: 6px 12px; margin-right: 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
+    .edit-btn { background: #007bff; color: white; }
+    .test-btn { background: #28a745; color: white; }
+    .test-btn:hover { background: #218838; }
+    .delete-btn { background: #dc3545; color: white; }
+    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+    .modal-content { background: white; margin: 5% auto; padding: 30px; border-radius: 10px; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .modal-header h2 { color: #333; }
+    .close { font-size: 28px; font-weight: bold; cursor: pointer; color: #999; }
+    .close:hover { color: #333; }
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; font-weight: 600; margin-bottom: 5px; color: #555; }
+    .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 0.9rem; }
+    .form-group input[type="checkbox"] { width: auto; margin-right: 8px; }
+    .checkbox-label { display: flex; align-items: center; }
+    .save-btn { width: 100%; padding: 12px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: bold; margin-top: 10px; }
+    .save-btn:hover { background: #218838; }
+    .status-message { padding: 10px; border-radius: 5px; margin-top: 15px; text-align: center; display: none; }
+    .status-message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .status-message.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .no-data { text-align: center; padding: 40px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header with logo and menu -->
+    <header>
+      <div class="logo-section">
+        <img src="https://udaproperty.com.my/sites/default/files/styles/project_logo/public/node/project/images/2022-12/Evoke_1.png?itok=MIgcniXd" alt="Evoke Logo" class="logo">
+        <h1 class="brand-text">EvokePass - Door Config</h1>
+      </div>
+      <div class="nav-menu">
+        <a href="/">📊 Dashboard</a>
+        <button onclick="toggleSettings()">⚙️ Publish Config</button>
+        <a href="/config/doors" class="active">🚪 Door Config</a>
+      </div>
+    </header>
+    
+    <div class="content">
+    <div class="controls">
+      <div>
+        <strong>Total Doors Configured: <span id="door-count">0</span></strong>
+      </div>
+      <button class="add-btn" onclick="showAddModal()">➕ Add Door Configuration</button>
+    </div>
+    
+    <div class="table-container">
+      <div style="overflow-x: auto; max-height: 600px; overflow-y: auto;">
+        <table id="doors-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Door Name (DEVNAME)</th>
+              <th>Camera IP</th>
+              <th>Port</th>
+              <th>Username</th>
+              <th>ONVIF</th>
+              <th>Stream URL</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="doors-body">
+            <tr><td colspan="8" class="no-data">Loading door configurations...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Modal for Add/Edit -->
+  <div id="doorModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modal-title">Add Door Configuration</h2>
+        <span class="close" onclick="closeModal()">&times;</span>
+      </div>
+      <form id="door-form">
+        <input type="hidden" id="door-id">
+        <div class="form-group">
+          <label>Door Name (DEVNAME) *</label>
+          <input type="text" id="door-devname" required placeholder="e.g., Barrier GateIN">
+        </div>
+        <div class="form-group">
+          <label>Camera IP Address *</label>
+          <input type="text" id="door-ip" required placeholder="192.168.1.100">
+        </div>
+        <div class="form-group">
+          <label>Camera Port</label>
+          <input type="number" id="door-port" value="80" placeholder="80">
+        </div>
+        <div class="form-group">
+          <label>Camera Username *</label>
+          <input type="text" id="door-username" required placeholder="admin">
+        </div>
+        <div class="form-group">
+          <label>Camera Password *</label>
+          <input type="password" id="door-password" required placeholder="password">
+        </div>
+        <div class="form-group">
+          <label>Stream URL (RTSP)</label>
+          <input type="text" id="door-stream" placeholder="rtsp://192.168.1.100:554/stream1">
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="door-onvif" checked>
+            Enable ONVIF
+          </label>
+        </div>
+        <button type="submit" class="save-btn">💾 Save Configuration</button>
+        <div id="modal-status" class="status-message"></div>
+      </form>
+    </div>
+  </div>
+  
+  <script>
+    let currentEditId = null;
+    
+    function showAddModal() {
+      currentEditId = null;
+      document.getElementById('modal-title').textContent = 'Add Door Configuration';
+      document.getElementById('door-form').reset();
+      document.getElementById('door-id').value = '';
+      document.getElementById('doorModal').style.display = 'block';
+    }
+    
+    function showEditModal(door) {
+      currentEditId = door.id;
+      document.getElementById('modal-title').textContent = 'Edit Door Configuration';
+      document.getElementById('door-id').value = door.id || '';
+      document.getElementById('door-devname').value = door.devname;
+      document.getElementById('door-ip').value = door.camera_ip;
+      document.getElementById('door-port').value = door.port || 80;
+      document.getElementById('door-username').value = door.username;
+      document.getElementById('door-password').value = door.password;
+      document.getElementById('door-stream').value = door.stream_url;
+      document.getElementById('door-onvif').checked = door.onvif_enabled !== false;
+      document.getElementById('doorModal').style.display = 'block';
+    }
+    
+    function closeModal() {
+      document.getElementById('doorModal').style.display = 'none';
+    }
+    
+    document.getElementById('door-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const id = document.getElementById('door-id').value;
+      const devname = document.getElementById('door-devname').value;
+      const camera_ip = document.getElementById('door-ip').value;
+      const port = document.getElementById('door-port').value;
+      const username = document.getElementById('door-username').value;
+      const password = document.getElementById('door-password').value;
+      const stream_url = document.getElementById('door-stream').value;
+      const onvif_enabled = document.getElementById('door-onvif').checked;
+      
+      if (!devname || !camera_ip || !username || !password) {
+        return showStatus('Please fill in all required fields.', 'error');
+      }
+      
+      try {
+        const response = await fetch('/api/door-cameras', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: id ? parseInt(id) : undefined,
+            devname,
+            camera_ip,
+            port: port ? parseInt(port) : undefined,
+            username,
+            password,
+            stream_url,
+            onvif_enabled
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          showStatus('✅ Configuration saved successfully!', 'success');
+          closeModal();
+          loadDoorConfigurations();
+        } else {
+          showStatus('❌ Failed to save: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (error) {
+        showStatus('❌ Failed to save configuration: ' + error.message, 'error');
+      }
+    });
+    
+    function showStatus(message, type) {
+      const statusDiv = document.getElementById('modal-status');
+      statusDiv.textContent = message;
+      statusDiv.className = 'status-message ' + type;
+      statusDiv.style.display = 'block';
+      
+      setTimeout(() => {
+        statusDiv.style.display = 'none';
+      }, 5000);
+    }
+    
+    function loadDoorConfigurations() {
+      fetch('/api/door-cameras')
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            const doors = data.data;
+            const tbody = document.getElementById('doors-body');
+            tbody.innerHTML = '';
+            
+            if (doors.length === 0) {
+              tbody.innerHTML = '<tr><td colspan="8" class="no-data">No door configurations found.</td></tr>';
+              return;
+            }
+            
+            doors.forEach(door => {
+              const tr = document.createElement('tr');
+              
+              tr.innerHTML = \`
+                <td>\${door.id}</td>
+                <td>\${door.devname}</td>
+                <td>\${door.camera_ip}</td>
+                <td>\${door.port || '-'}</td>
+                <td>\${door.username}</td>
+                <td>\${door.onvif_enabled ? '✅' : '❌'}</td>
+                <td>\${door.stream_url ? '✅' : '❌'}</td>
+                <td class="actions">
+                  <button class="edit-btn" onclick="showEditModal(door)">✏️ Edit</button>
+                  <button class="test-btn" onclick="testCamera(door)">📷 Test</button>
+                  <button class="delete-btn" onclick="deleteDoor(door.id)">🗑️ Delete</button>
+                </td>
+              \`;
+              
+              tbody.appendChild(tr);
+            });
+            
+            document.getElementById('door-count').textContent = doors.length;
+          } else {
+            console.error('Failed to load door configurations:', data.error);
+            document.getElementById('doors-body').innerHTML = 
+              '<tr><td colspan="8" class="no-data">Error loading door configurations.</td></tr>';
+          }
+        })
+        .catch(error => {
+          console.error('Error loading door configurations:', error);
+          document.getElementById('doors-body').innerHTML = 
+            '<tr><td colspan="8" class="no-data">Error loading door configurations. Make sure the server is running.</td></tr>';
+        });
+    }
+    
+    function testCamera(door) {
+      const devname = door.devname;
+      const testUrl = '/api/test-snapshot/' + encodeURIComponent(devname);
+      
+      fetch(testUrl, { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            showStatus('📸 Snapshot captured successfully!', 'success');
+            console.log('Snapshot data:', data);
+          } else {
+            showStatus('❌ Error capturing snapshot: ' + (data.error || 'Unknown error'), 'error');
+          }
+        })
+        .catch(error => {
+          showStatus('❌ Error capturing snapshot: ' + error.message, 'error');
+          console.error('Snapshot error:', error);
+        });
+    }
+    
+    function deleteDoor(id) {
+      if (!confirm('Are you sure you want to delete this door configuration?')) {
+        return;
+      }
+      
+      fetch('/api/door-cameras/' + encodeURIComponent(id), { method: 'DELETE' })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            showStatus('🗑️ Door configuration deleted.', 'success');
+            loadDoorConfigurations();
+          } else {
+            showStatus('❌ Error deleting door configuration: ' + (data.error || 'Unknown error'), 'error');
+          }
+        })
+        .catch(error => {
+          showStatus('❌ Error deleting door configuration: ' + error.message, 'error');
+          console.error('Delete door error:', error);
+        });
+    }
+    
+    // Initial load
+    loadDoorConfigurations();
+  </script>
+  
+  <footer>
+    <p>&copy; 2022-2025 EvokePass. All Rights Reserved.</p>
+  </footer>
+</body>
+</html>`;
+}
 
 server.listen(PORT, () => {
   console.log(`Web UI running at http://localhost:${PORT}`);
-  console.log(`WebSocket server available at ws://localhost:${PORT}/ws`);
 });

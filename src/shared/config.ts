@@ -22,6 +22,11 @@ export interface LoggingConfig {
   logFiltering: boolean;
 }
 
+export interface CallTrackingConfig {
+  enabled: boolean;
+  trackedItems: string[];
+}
+
 export interface CameraConfig {
   host: string;
   port: number;
@@ -42,6 +47,7 @@ export interface AppConfig {
   filtering: FilteringConfig;
   cctv: CCTVConfig;
   logging: LoggingConfig;
+  callTracking: CallTrackingConfig;
 }
 
 class ConfigManager {
@@ -57,6 +63,12 @@ class ConfigManager {
     try {
       const configFile = fs.readFileSync(this.configPath, 'utf-8');
       const config = JSON.parse(configFile) as AppConfig;
+      
+      // Ensure callTracking config exists
+      if (!config.callTracking) {
+        config.callTracking = { enabled: false, trackedItems: [] };
+      }
+      
       console.log('Configuration loaded successfully');
       return config;
     } catch (error: any) {
@@ -90,6 +102,10 @@ class ConfigManager {
       logging: {
         logForwarding: true,
         logFiltering: true
+      },
+      callTracking: {
+        enabled: false,
+        trackedItems: []
       }
     };
   }
@@ -114,6 +130,10 @@ class ConfigManager {
     return this.config.cctv;
   }
 
+  public getCallTrackingConfig(): CallTrackingConfig {
+    return this.config.callTracking;
+  }
+
   public getCameraConfig(deviceName: string): CameraConfig | undefined {
     return this.config.cctv.cameras[deviceName];
   }
@@ -135,6 +155,21 @@ class ConfigManager {
       return false;
     }
     return this.config.filtering.skipEventTypes.includes(eventType);
+  }
+
+  public isTrackingEnabled(): boolean {
+    return this.config.callTracking.enabled;
+  }
+
+  public getTrackedItems(): string[] {
+    return this.config.callTracking.trackedItems;
+  }
+
+  public setTrackedItems(items: string[]): void {
+    this.config.callTracking.enabled = items.length > 0;
+    this.config.callTracking.trackedItems = items;
+    // Note: This does not save to config.json, it's an in-memory change.
+    // A separate mechanism would be needed to persist this.
   }
 
   public shouldForwardDevice(deviceName: string): boolean {

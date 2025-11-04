@@ -6,11 +6,16 @@
     "protocol": "tcp",
     "timeout": 5000,
     "retryAttempts": 3,
-    "filterDevices": ["Barrier GateIN", "Barrier GateOUT"]
+    "filterDevices": [
+      "Barrier GateIN",
+      "Barrier GateOUT"
+    ]
   },
   "filtering": {
     "enabled": true,
-    "skipStaffNumbers": ["27-09"],
+    "skipStaffNumbers": [
+      "27-09"
+    ],
     "skipEventTypes": []
   },
   "cctv": {
@@ -42,5 +47,12 @@
     "enabled": false,
     "sourceHost": "192.168.1.99",
     "timeoutSeconds": 30
+  },
+  "callTracking": {
+    "enabled": true,
+    "trackedNumbers": [],
+    "trackedItems": [
+      "devname:Barrier GateIN"
+    ]
   }
 }

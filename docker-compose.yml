@@ -9,7 +9,7 @@ services:
       - "3000:3000"  # Web UI
     volumes:
       # Mount your config.json
-      - ./config.json:/app/config.json:ro
+      - ./config.json:/app/config.json
       # Persist database
       - ./data:/app/data
       # Persist CCTV snapshots

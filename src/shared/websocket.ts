@@ -40,7 +40,7 @@ export class WebSocketBroadcaster {
   }
 
   public broadcastNewEvent(event: any): void {
-    console.log(`Broadcasting new event to ${this.clients.size} clients`);
+    console.log(`Broadcasting new event to ${this.clients.size} clients. Event ID: ${event.id}, Is Tracked: ${event.isTracked}`);
     if (this.clients.size === 0) {
       console.log('No WebSocket clients connected');
       return;
@@ -55,6 +55,20 @@ export class WebSocketBroadcaster {
       if (client.readyState === WebSocket.OPEN) {
         client.send(message);
         console.log('Event broadcasted to client');
+      }
+    });
+  }
+
+  public broadcastCallTrackingEvent(event: any): void {
+    console.log(`Broadcasting call tracking event to ${this.clients.size} clients for Staff: ${event.staffname}`);
+    const message = JSON.stringify({
+      type: 'callTracking',
+      data: event
+    });
+
+    this.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
       }
     });
   }
